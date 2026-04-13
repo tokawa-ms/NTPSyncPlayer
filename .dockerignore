@@ -1,6 +1,14 @@
 .git
 node_modules
 .env
+.env.*
 *.md
 infra/
+docs/
 deploy.sh
+deploy.ps1
+deploy.sh.tmp
+deploy.ps1.tmp
+LICENSE
+.gitignore
+.dockerignore
