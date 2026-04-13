@@ -1,0 +1,97 @@
+# deploy.ps1 — Build the Docker image, push it to Azure Container Registry,
+#              then deploy the app to Azure Container Apps via Bicep.
+#
+# Prerequisites:
+#   - Azure CLI (az) installed and logged in  (az login)
+#   - Docker Desktop installed and running
+#   - PowerShell 5.1+ or PowerShell 7+
+#
+# Usage:
+#   .\deploy.ps1
+# Or override defaults by passing parameters:
+#   .\deploy.ps1 -ResourceGroup my-rg -AcrName myacr -Location japaneast
+
+[CmdletBinding()]
+param(
+    [string]$ResourceGroup = "example-ptpqa-rg",
+    [string]$Location = "japaneast",
+    [string]$AcrName = "exampleptpqaacr",  # must be globally unique, lowercase
+    [string]$AppName = "example-ptpqa",
+    [string]$ImageTag = "latest"
+)
+
+$ErrorActionPreference = "Stop"
+
+# ── Derived values ─────────────────────────────────────────────────────────────
+$AcrLoginServer = "$AcrName.azurecr.io"
+$ImageName = "$AcrLoginServer/${AppName}:$ImageTag"
+$ScriptDir = $PSScriptRoot
+
+Write-Host "=== tokawaPTPQA — Azure Container Apps deployment ===" -ForegroundColor Cyan
+Write-Host "  Resource Group : $ResourceGroup"
+Write-Host "  Location       : $Location"
+Write-Host "  ACR            : $AcrLoginServer"
+Write-Host "  Image          : $ImageName"
+Write-Host ""
+
+# ── 1. Ensure resource group exists ───────────────────────────────────────────
+Write-Host ">>> Creating / verifying resource group..." -ForegroundColor Yellow
+az group create `
+    --name $ResourceGroup `
+    --location $Location `
+    --output none
+if ($LASTEXITCODE -ne 0) { throw "Failed to create resource group." }
+
+# ── 2. Ensure Azure Container Registry exists ─────────────────────────────────
+Write-Host ">>> Creating / verifying Azure Container Registry..." -ForegroundColor Yellow
+az acr create `
+    --resource-group $ResourceGroup `
+    --name $AcrName `
+    --sku Basic `
+    --admin-enabled true `
+    --output none
+if ($LASTEXITCODE -ne 0) { throw "Failed to create ACR '$AcrName'. The name must be globally unique." }
+
+# ── 3. Build & push the Docker image ──────────────────────────────────────────
+Write-Host ">>> Building Docker image..." -ForegroundColor Yellow
+docker build -t $ImageName $ScriptDir
+if ($LASTEXITCODE -ne 0) { throw "Docker build failed." }
+
+Write-Host ">>> Logging in to ACR..." -ForegroundColor Yellow
+az acr login --name $AcrName
+if ($LASTEXITCODE -ne 0) { throw "ACR login failed." }
+
+Write-Host ">>> Pushing image to ACR..." -ForegroundColor Yellow
+docker push $ImageName
+if ($LASTEXITCODE -ne 0) { throw "Docker push failed." }
+
+# ── 4. Retrieve ACR credentials ───────────────────────────────────────────────
+Write-Host ">>> Fetching ACR credentials..." -ForegroundColor Yellow
+$AcrUsername = az acr credential show --name $AcrName --query "username" -o tsv
+$AcrPassword = az acr credential show --name $AcrName --query "passwords[0].value" -o tsv
+if ($LASTEXITCODE -ne 0) { throw "Failed to fetch ACR credentials." }
+
+# ── 5. Deploy via Bicep ────────────────────────────────────────────────────────
+Write-Host ">>> Deploying Bicep template..." -ForegroundColor Yellow
+az deployment group create `
+    --resource-group $ResourceGroup `
+    --template-file "$ScriptDir\infra\main.bicep" `
+    --parameters `
+    appName=$AppName `
+    location=$Location `
+    containerImage=$ImageName `
+    acrLoginServer=$AcrLoginServer `
+    acrUsername=$AcrUsername `
+    acrPassword=$AcrPassword `
+    --output table
+if ($LASTEXITCODE -ne 0) { throw "Bicep deployment failed." }
+
+# ── 6. Show the app URL ────────────────────────────────────────────────────────
+$AppUrl = az deployment group show `
+    --resource-group $ResourceGroup `
+    --name main `
+    --query "properties.outputs.appUrl.value" -o tsv
+
+Write-Host ""
+Write-Host "=== Deployment complete ===" -ForegroundColor Green
+Write-Host "App URL: $AppUrl" -ForegroundColor Green
