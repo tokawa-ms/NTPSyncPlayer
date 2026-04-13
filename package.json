@@ -1,10 +1,12 @@
 {
-  "name": "ptp-qa-sync-countdown",
+  "name": "ntp-sync-countdown",
   "version": "1.0.0",
   "description": "複数マシン間で同期するカウントダウンタイマーアプリ",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "ntp-client": "^0.5.3"
+  }
 }

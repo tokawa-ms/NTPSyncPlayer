@@ -1,4 +1,4 @@
-// Azure Container Apps deployment for tokawaPTPQA
+// Azure Container Apps deployment for NTP Sync Countdown
 // Deploys: Log Analytics Workspace, Container Apps Environment, Container App
 // Assumes a Container Registry already exists (built image pushed beforehand)
 
@@ -6,9 +6,9 @@
 param location string = resourceGroup().location
 
 @description('Base name used as prefix for resource names')
-param appName string = 'tokawa-ptpqa'
+param appName string = 'ntpsync'
 
-@description('Full image name including tag, e.g. myacr.azurecr.io/tokawa-ptpqa:latest')
+@description('Full image name including tag, e.g. myacr.azurecr.io/ntpsync:latest')
 param containerImage string
 
 @description('Azure Container Registry login server, e.g. myacr.azurecr.io')

@@ -1,9 +1,39 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const ntpClient = require('ntp-client');
 
 const PORT = process.env.PORT || 6413;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// ===== NTP offset cache =====
+const NTP_SERVER = 'ntp.nict.jp';
+const NTP_PORT = 123;
+let ntpOffset = null;        // ms (NTP time - local time)
+let ntpLastSync = null;       // Date of last successful sync
+let ntpError = null;
+
+function queryNtpOffset() {
+  const sendTime = Date.now();
+  ntpClient.getNetworkTime(NTP_SERVER, NTP_PORT, (err, date) => {
+    const recvTime = Date.now();
+    if (err) {
+      ntpError = err.message || String(err);
+      return;
+    }
+    // Simple offset: NTP time - midpoint of request
+    const rtt = recvTime - sendTime;
+    const ntpMs = date.getTime();
+    const localMid = sendTime + rtt / 2;
+    ntpOffset = ntpMs - localMid;
+    ntpLastSync = new Date().toISOString();
+    ntpError = null;
+  });
+}
+
+// Query on startup and every 60 seconds
+queryNtpOffset();
+setInterval(queryNtpOffset, 60_000);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -19,6 +49,24 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
+  // ===== NTP offset API =====
+  const reqUrl = new URL(req.url, `http://${req.headers.host}`);
+  if (reqUrl.pathname === '/api/ntp-offset') {
+    const serverTime = Date.now();
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    });
+    res.end(JSON.stringify({
+      offsetMs: ntpOffset,
+      lastSync: ntpLastSync,
+      server: NTP_SERVER,
+      error: ntpError,
+      serverTime: serverTime,
+    }));
+    return;
+  }
+
   // パスの正規化（ディレクトリトラバーサル防止）
   let reqPath = decodeURIComponent(req.url.split('?')[0]);
   if (reqPath === '/') reqPath = '/index.html';
@@ -55,19 +103,27 @@ const server = http.createServer((req, res) => {
         res.end();
         return;
       }
-      res.writeHead(206, {
+      const headers206 = {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': end - start + 1,
         'Content-Type': contentType,
-      });
+      };
+      if (ext === '.html' || ext === '.js' || ext === '.css') {
+        headers206['Cache-Control'] = 'no-cache';
+      }
+      res.writeHead(206, headers206);
       fs.createReadStream(resolved, { start, end }).pipe(res);
     } else {
-      res.writeHead(200, {
+      const headers200 = {
         'Content-Type': contentType,
         'Content-Length': fileSize,
         'Accept-Ranges': 'bytes',
-      });
+      };
+      if (ext === '.html' || ext === '.js' || ext === '.css') {
+        headers200['Cache-Control'] = 'no-cache';
+      }
+      res.writeHead(200, headers200);
       fs.createReadStream(resolved).pipe(res);
     }
   });
@@ -75,5 +131,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Sync Countdown Server running at http://0.0.0.0:${PORT}`);
+  console.log(`Local: http://localhost:${PORT}`);
   console.log(`LAN内の他マシンからは http://<このマシンのIP>:${PORT} でアクセス`);
 });
