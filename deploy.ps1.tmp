@@ -13,10 +13,10 @@
 
 [CmdletBinding()]
 param(
-    [string]$ResourceGroup = "example-ptpqa-rg",
+    [string]$ResourceGroup = "example-ntpsync-rg",
     [string]$Location = "japaneast",
-    [string]$AcrName = "exampleptpqaacr",  # must be globally unique, lowercase
-    [string]$AppName = "example-ptpqa",
+    [string]$AcrName = "examplentpsyncacr",  # must be globally unique, lowercase
+    [string]$AppName = "example-ntpsync",
     [string]$ImageTag = "latest"
 )
 
@@ -27,7 +27,7 @@ $AcrLoginServer = "$AcrName.azurecr.io"
 $ImageName = "$AcrLoginServer/${AppName}:$ImageTag"
 $ScriptDir = $PSScriptRoot
 
-Write-Host "=== tokawaPTPQA — Azure Container Apps deployment ===" -ForegroundColor Cyan
+Write-Host "=== NTP Sync Countdown — Azure Container Apps deployment ===" -ForegroundColor Cyan
 Write-Host "  Resource Group : $ResourceGroup"
 Write-Host "  Location       : $Location"
 Write-Host "  ACR            : $AcrLoginServer"

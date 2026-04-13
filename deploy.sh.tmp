@@ -16,10 +16,10 @@
 set -euo pipefail
 
 # ── Configuration (edit these or export as environment variables) ─────────────
-RESOURCE_GROUP="${RESOURCE_GROUP:-example-ptpqa-rg}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-example-ntpsync-rg}"
 LOCATION="${LOCATION:-japaneast}"
 ACR_NAME="${ACR_NAME:-exampleacr}"           # must be globally unique, lowercase
-APP_NAME="${APP_NAME:-example-ptpqa}"
+APP_NAME="${APP_NAME:-example-ntpsync}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Derived values
@@ -27,7 +27,7 @@ ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 IMAGE_NAME="${ACR_LOGIN_SERVER}/${APP_NAME}:${IMAGE_TAG}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== tokawaPTPQA — Azure Container Apps deployment ==="
+echo "=== NTP Sync Countdown — Azure Container Apps deployment ==="
 echo "  Resource Group : ${RESOURCE_GROUP}"
 echo "  Location       : ${LOCATION}"
 echo "  ACR            : ${ACR_LOGIN_SERVER}"
