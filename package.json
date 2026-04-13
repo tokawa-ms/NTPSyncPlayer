@@ -1,0 +1,10 @@
+{
+  "name": "ptp-qa-sync-countdown",
+  "version": "1.0.0",
+  "description": "複数マシン間で同期するカウントダウンタイマーアプリ",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}
