@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# deploy.sh — Build the Docker image, push it to Azure Container Registry,
+#             then deploy the app to Azure Container Apps via Bicep.
+#
+# Prerequisites:
+#   - Azure CLI (az) installed and logged in  (az login)
+#   - Docker installed and running
+#   - The target Resource Group already exists
+#
+# Usage:
+#   chmod +x deploy.sh
+#   ./deploy.sh
+# Or override defaults:
+#   ACR_NAME=myacr RESOURCE_GROUP=my-rg ./deploy.sh
+
+set -euo pipefail
+
+# ── Configuration (edit these or export as environment variables) ─────────────
+RESOURCE_GROUP="${RESOURCE_GROUP:-example-ptpqa-rg}"
+LOCATION="${LOCATION:-japaneast}"
+ACR_NAME="${ACR_NAME:-exampleacr}"           # must be globally unique, lowercase
+APP_NAME="${APP_NAME:-example-ptpqa}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+# Derived values
+ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+IMAGE_NAME="${ACR_LOGIN_SERVER}/${APP_NAME}:${IMAGE_TAG}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "=== tokawaPTPQA — Azure Container Apps deployment ==="
+echo "  Resource Group : ${RESOURCE_GROUP}"
+echo "  Location       : ${LOCATION}"
+echo "  ACR            : ${ACR_LOGIN_SERVER}"
+echo "  Image          : ${IMAGE_NAME}"
+echo ""
+
+# ── 1. Ensure resource group exists ──────────────────────────────────────────
+echo ">>> Creating / verifying resource group..."
+az group create \
+  --name "${RESOURCE_GROUP}" \
+  --location "${LOCATION}" \
+  --output none
+
+# ── 2. Ensure Azure Container Registry exists ─────────────────────────────────
+echo ">>> Creating / verifying Azure Container Registry..."
+az acr create \
+  --resource-group "${RESOURCE_GROUP}" \
+  --name "${ACR_NAME}" \
+  --sku Basic \
+  --admin-enabled true \
+  --output none 2>/dev/null || true
+
+# ── 3. Build & push the Docker image ─────────────────────────────────────────
+echo ">>> Building Docker image..."
+docker build -t "${IMAGE_NAME}" "${SCRIPT_DIR}"
+
+echo ">>> Logging in to ACR..."
+az acr login --name "${ACR_NAME}"
+
+echo ">>> Pushing image to ACR..."
+docker push "${IMAGE_NAME}"
+
+# ── 4. Retrieve ACR credentials ───────────────────────────────────────────────
+echo ">>> Fetching ACR credentials..."
+ACR_USERNAME=$(az acr credential show --name "${ACR_NAME}" --query "username" -o tsv)
+ACR_PASSWORD=$(az acr credential show --name "${ACR_NAME}" --query "passwords[0].value" -o tsv)
+
+# ── 5. Deploy via Bicep ───────────────────────────────────────────────────────
+echo ">>> Deploying Bicep template..."
+az deployment group create \
+  --resource-group "${RESOURCE_GROUP}" \
+  --template-file "${SCRIPT_DIR}/infra/main.bicep" \
+  --parameters \
+      appName="${APP_NAME}" \
+      location="${LOCATION}" \
+      containerImage="${IMAGE_NAME}" \
+      acrLoginServer="${ACR_LOGIN_SERVER}" \
+      acrUsername="${ACR_USERNAME}" \
+      acrPassword="${ACR_PASSWORD}" \
+  --output table
+
+# ── 6. Show the app URL ───────────────────────────────────────────────────────
+APP_URL=$(az deployment group show \
+  --resource-group "${RESOURCE_GROUP}" \
+  --name main \
+  --query "properties.outputs.appUrl.value" -o tsv)
+
+echo ""
+echo "=== Deployment complete ==="
+echo "App URL: ${APP_URL}"

@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Video files (rights restricted)
+*.mp4
+
+# Deploy scripts with real resource names
+deploy.sh
+deploy.ps1
