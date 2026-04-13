@@ -125,13 +125,47 @@
       background: rgba(255,255,255,0.2);
       color: #fff;
     }
+
+    /* タップして開始オーバーレイ（モバイル用） */
+    #tap-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 100;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      cursor: pointer;
+    }
+
+    #tap-overlay.hidden {
+      display: none;
+    }
+
+    #tap-overlay .tap-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+
+    #tap-overlay .tap-text {
+      font-size: 1.5rem;
+      color: rgba(255,255,255,0.8);
+      letter-spacing: 0.1em;
+    }
   </style>
 </head>
 <body>
   <div id="video-container">
-    <video id="video" preload="auto" playsinline muted>
+    <video id="video" preload="auto" playsinline muted loop>
       <source src="bg-movie-countdown01.mp4" type="video/mp4">
     </video>
+  </div>
+
+  <!-- モバイルAutoplay制限回避用オーバーレイ -->
+  <div id="tap-overlay" class="hidden">
+    <div class="tap-icon">▶</div>
+    <div class="tap-text">タップして開始</div>
   </div>
 
   <button id="fullscreen-btn">⛶ フルスクリーン</button>
@@ -155,10 +189,44 @@
     const nextStartEl = document.getElementById('next-start');
     const fullscreenBtn = document.getElementById('fullscreen-btn');
     const muteBtn     = document.getElementById('mute-btn');
+    const tapOverlay  = document.getElementById('tap-overlay');
 
     // ===== State =====
     let isPlaying = false;   // 動画再生中フラグ
     let isMuted   = true;    // 初期はmuted（自動再生のため）
+    let videoUnlocked = false; // ユーザージェスチャーで再生が許可されたか
+    let videoStarted  = false; // video.play() が一度でも成功したか
+
+    // ===== 動画を開始（一度だけ呼ぶ。以後 pause しない） =====
+    function startVideoOnce() {
+      if (videoStarted) return;
+      const p = video.play();
+      if (p !== undefined) {
+        p.then(() => {
+          videoStarted = true;
+          videoUnlocked = true;
+          video.style.visibility = 'hidden'; // 最初は隠す（待機中かもしれないため）
+        }).catch(() => {
+          // Autoplay 失敗 → タップオーバーレイを表示
+          tapOverlay.classList.remove('hidden');
+        });
+      }
+    }
+
+    // ===== Autoplay検出 =====
+    function checkAutoplay() {
+      startVideoOnce();
+    }
+
+    // タップでオーバーレイを閉じ、動画を有効化
+    tapOverlay.addEventListener('click', () => {
+      video.play().then(() => {
+        videoStarted = true;
+        videoUnlocked = true;
+        video.style.visibility = 'hidden';
+        tapOverlay.classList.add('hidden');
+      }).catch(() => {});
+    });
 
     // ===== Main loop =====
     function update() {
@@ -198,15 +266,28 @@
           elapsed = (sec + 60 - activeStart) + ms / 1000;
         }
 
+        // 動画を表示
+        video.style.visibility = 'visible';
+
+        // まだ play() していなければ開始を試みる
+        if (!videoStarted) {
+          startVideoOnce();
+        }
+
+        // currentTime を同期（大きなドリフト時のみシーク）
         if (!isPlaying) {
           video.currentTime = elapsed;
-          video.play().catch(() => {});
           isPlaying = true;
         } else {
           const drift = Math.abs(video.currentTime - elapsed);
-          if (drift > 0.3) {
+          if (drift > 0.5) {
             video.currentTime = elapsed;
           }
+        }
+
+        // 動画が止まっていたら再開（バッテリー節約等で止まった場合）
+        if (videoStarted && video.paused) {
+          video.play().catch(() => {});
         }
 
         statusEl.textContent = '▶ カウントダウン再生中';
@@ -214,11 +295,10 @@
 
       } else {
         // ===== 待機中 =====
-        if (isPlaying) {
-          video.pause();
-          video.currentTime = 0;
-          isPlaying = false;
-        }
+        // pause() は呼ばない — モバイルで再開できなくなるため
+        // 動画を非表示にして裏で回し続ける
+        video.style.visibility = 'hidden';
+        isPlaying = false;
 
         // 次の再生開始までの秒数を計算
         let minWait = 60;
@@ -252,6 +332,7 @@
     });
 
     // ===== Start =====
+    checkAutoplay();
     requestAnimationFrame(update);
   </script>
 </body>

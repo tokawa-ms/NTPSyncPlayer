@@ -42,9 +42,34 @@ const server = http.createServer((req, res) => {
 
     const ext = path.extname(resolved).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const fileSize = stats.size;
 
-    res.writeHead(200, { 'Content-Type': contentType });
-    fs.createReadStream(resolved).pipe(res);
+    // Range リクエスト対応（スマホブラウザの動画再生に必須）
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      if (start >= fileSize || end >= fileSize || start > end) {
+        res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+        res.end();
+        return;
+      }
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': end - start + 1,
+        'Content-Type': contentType,
+      });
+      fs.createReadStream(resolved, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+      });
+      fs.createReadStream(resolved).pipe(res);
+    }
   });
 });
 
