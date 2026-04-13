@@ -153,6 +153,33 @@
       color: rgba(255,255,255,0.8);
       letter-spacing: 0.1em;
     }
+
+    /* フォールバックカウントダウン表示 */
+    #fallback-countdown {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 5;
+      font-size: 30vw;
+      font-weight: bold;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 0 60px rgba(255, 255, 255, 0.5),
+                   0 0 100px rgba(255, 255, 255, 0.3);
+      pointer-events: none;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* カウントダウン終了時のフラッシュ */
+    body.countdown-zero {
+      background: #fff !important;
+    }
+
+    body.countdown-zero #fallback-countdown {
+      color: rgba(0, 0, 0, 0.9);
+      text-shadow: none;
+    }
   </style>
 </head>
 <body>
@@ -161,6 +188,8 @@
       <source src="bg-movie-countdown01.mp4" type="video/mp4">
     </video>
   </div>
+
+  <div id="fallback-countdown"></div>
 
   <!-- モバイルAutoplay制限回避用オーバーレイ -->
   <div id="tap-overlay" class="hidden">
@@ -183,17 +212,57 @@
 
   <script>
     // ===== DOM references =====
-    const video       = document.getElementById('video');
-    const statusEl    = document.getElementById('status');
-    const clockEl     = document.getElementById('clock');
-    const nextStartEl = document.getElementById('next-start');
-    const fullscreenBtn = document.getElementById('fullscreen-btn');
-    const muteBtn     = document.getElementById('mute-btn');
+    const video              = document.getElementById('video');
+    const statusEl           = document.getElementById('status');
+    const clockEl            = document.getElementById('clock');
+    const nextStartEl        = document.getElementById('next-start');
+    const fullscreenBtn      = document.getElementById('fullscreen-btn');
+    const muteBtn            = document.getElementById('mute-btn');
+    const fallbackCountdownEl = document.getElementById('fallback-countdown');
     const tapOverlay  = document.getElementById('tap-overlay');
 
     // ===== State =====
-    let isPlaying = false;   // 動画再生中フラグ
-    let isMuted   = true;    // 初期はmuted（自動再生のため）
+    let isPlaying       = false;   // 動画再生中フラグ
+    let isMuted         = true;    // 初期はmuted（自動再生のため）
+    let videoAvailable  = true;    // 動画ファイルの存在フラグ
+    let fallbackBeepSec = -1;      // フォールバック時の直前ビープカウント値
+    let fallbackWasActive = false; // フォールバック前フレームの再生区間内フラグ
+    let fallbackZeroUntil = 0;     // "0" 表示終了時刻（ms）
+    let audioCtx        = null;    // Web Audio API コンテキスト
+
+    // ===== Web Audio API (フォールバック用ビープ) =====
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      return audioCtx;
+    }
+
+    function playBeep(freq, dur) {
+      if (isMuted) return;
+      try {
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.5, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + dur);
+      } catch (e) {}
+    }
+
+    // ===== 動画読み込みエラー検出 =====
+    const sourceEl = video.querySelector('source');
+    if (sourceEl) sourceEl.addEventListener('error', () => { videoAvailable = false; });
+    video.addEventListener('error', () => { videoAvailable = false; });
+    video.addEventListener('loadedmetadata', () => { videoAvailable = true; });
     let videoUnlocked = false; // ユーザージェスチャーで再生が許可されたか
     let videoStarted  = false; // video.play() が一度でも成功したか
 
@@ -257,7 +326,7 @@
       }
 
       if (activeStart >= 0) {
-        // ===== 動画再生区間 =====
+        // ===== 再生区間 =====
         let elapsed;
         if (sec >= activeStart) {
           elapsed = (sec - activeStart) + ms / 1000;
@@ -266,7 +335,9 @@
           elapsed = (sec + 60 - activeStart) + ms / 1000;
         }
 
-        // 動画を表示
+        if (videoAvailable) {
+          // ===== 動画再生 =====
+          // 動画を表示
         video.style.visibility = 'visible';
 
         // まだ play() していなければ開始を試みる
@@ -276,13 +347,31 @@
 
         // currentTime を同期（大きなドリフト時のみシーク）
         if (!isPlaying) {
-          video.currentTime = elapsed;
-          isPlaying = true;
-        } else {
-          const drift = Math.abs(video.currentTime - elapsed);
-          if (drift > 0.5) {
             video.currentTime = elapsed;
+              isPlaying = true;
+          } else {
+            const drift = Math.abs(video.currentTime - elapsed);
+            if (drift > 0.5) {
+              video.currentTime = elapsed;
+            }
           }
+          fallbackCountdownEl.textContent = '';
+          document.body.classList.remove('countdown-zero');
+        } else {
+          // ===== フォールバック: 動画なし =====
+          if (isPlaying) {
+            video.pause();
+            video.currentTime = 0;
+            isPlaying = false;
+          }
+          const countdownNum = Math.max(1, 10 - Math.floor(elapsed));
+          fallbackCountdownEl.textContent = String(countdownNum);
+          if (countdownNum !== fallbackBeepSec) {
+            fallbackBeepSec = countdownNum;
+            playBeep(880, 0.15);
+          }
+          document.body.classList.remove('countdown-zero');
+          fallbackWasActive = true;
         }
 
         // 動画が止まっていたら再開（バッテリー節約等で止まった場合）
@@ -300,14 +389,32 @@
         video.style.visibility = 'hidden';
         isPlaying = false;
 
-        // 次の再生開始までの秒数を計算
-        let minWait = 60;
-        for (const s of START_SECS) {
-          const wait = (s - sec + 60) % 60;
-          if (wait > 0 && wait < minWait) minWait = wait;
+        // フォールバック: カウントダウン終了 → "0" 表示とフラッシュ
+        if (!videoAvailable && fallbackWasActive) {
+          fallbackWasActive = false;
+          fallbackBeepSec = -1;
+          fallbackZeroUntil = Date.now() + 1500;
+          playBeep(1320, 0.5);
         }
-        statusEl.textContent = '待機中...';
-        nextStartEl.textContent = `次のカウントダウンまで ${minWait} 秒`;
+
+        if (!videoAvailable && Date.now() < fallbackZeroUntil) {
+          fallbackCountdownEl.textContent = '0';
+          document.body.classList.add('countdown-zero');
+          statusEl.textContent = '▶ カウントダウン再生中';
+          nextStartEl.textContent = '';
+        } else {
+          fallbackCountdownEl.textContent = '';
+          document.body.classList.remove('countdown-zero');
+
+          // 次の再生開始までの秒数を計算
+          let minWait = 60;
+          for (const s of START_SECS) {
+            const wait = (s - sec + 60) % 60;
+            if (wait > 0 && wait < minWait) minWait = wait;
+          }
+          statusEl.textContent = '待機中...';
+          nextStartEl.textContent = `次のカウントダウンまで ${minWait} 秒`;
+        }
       }
 
       requestAnimationFrame(update);
@@ -329,6 +436,7 @@
       isMuted = !isMuted;
       video.muted = isMuted;
       muteBtn.textContent = isMuted ? '🔇 音声OFF（クリックでON）' : '🔊 音声ON';
+      if (!isMuted) getAudioContext(); // AudioContext を起動（ユーザー操作後に有効）
     });
 
     // ===== Start =====
